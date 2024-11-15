@@ -1,7 +1,3 @@
-### README for PHP Image Thumbnail Generator
-
----
-
 # PHP Image Thumbnail Generator
 
 A lightweight PHP class for generating image thumbnails using the GD library. This tool supports multiple image formats, including JPEG, PNG, and GIF. It ensures simplicity, performance, and compatibility for your PHP projects.
