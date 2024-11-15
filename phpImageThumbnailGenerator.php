@@ -1,152 +1,167 @@
 <?php
 
 /**
- * @author Kiumars Babolhavaeji - k.babolhavaeji@gmail.com
- * 30 December 2023
+ * PHP Image Thumbnail Generator
+ * Generates thumbnails from images using the GD library.
+ * 
+ * @author Kiumars Babolhavaeji
+ * @date 30 December 2023
  */
-class phpImageThumbnailGenerator
+class ImageThumbnailGenerator
 {
-
     protected GdImage $image;
     protected GdImage $thumbnail;
-
-    protected $imageMime;
-    protected $fileName;
+    protected string $imageMime;
+    protected string $fileName;
 
     /**
-     * @param string $realPath
-     * @throws Exception
+     * Constructor
      *
+     * @param string $relativePath Relative path to the image file.
+     * @throws Exception
      */
-    public function __construct(
-        string $realPath,
-    )
+    public function __construct(string $relativePath)
     {
+        $imagePath = getcwd() . $relativePath;
 
-        $imagePath = getcwd() . $realPath;
+        $this->ensureGdIsLoaded();
+        $this->ensureFileExists($imagePath);
+        $this->ensureFileIsImage($imagePath);
 
-        // check rather GD module is installed on the server or not
-        $this->checkGD();
-
-        // check the file to be exists
-        $this->checkFileExistence($imagePath);
-
-        // check if file is Image or not
-        $this->checkIsImage($imagePath);
-
-        // extract file name
-        $this->setFileName($imagePath);
-
-        // set up an instance from GD by using original image file
-        $this->readFile($imagePath);
-
+        $this->setFileNameFromPath($imagePath);
+        $this->loadImage($imagePath);
     }
 
     /**
-     * @param string $thumbnailPath
-     * @param int $thumbnailWidth
-     * @param int $thumbnailHeight
-     * @param string $chmod
+     * Generate a thumbnail image and save it to the specified path.
+     *
+     * @param string $thumbnailPath Path to save the generated thumbnail.
+     * @param int $thumbnailWidth Width of the thumbnail.
+     * @param int $thumbnailHeight Height of the thumbnail.
+     * @param string $chmod Optional permissions for the thumbnail file.
+     * @throws Exception
      */
-    public function generateThumbnail(string $thumbnailPath, int $thumbnailWidth, int $thumbnailHeight, string $chmod = '0644'): void
-    {
+    public function generateThumbnail(
+        string $thumbnailPath,
+        int $thumbnailWidth,
+        int $thumbnailHeight,
+        string $chmod = '0644'
+    ): void {
         $savePath = getcwd() . $thumbnailPath;
-        $width = imagesx($this->image);
-        $height = imagesy($this->image);
+        [$originalWidth, $originalHeight] = [imagesx($this->image), imagesy($this->image)];
 
         $this->thumbnail = imagecreatetruecolor($thumbnailWidth, $thumbnailHeight);
 
-        $widthRatio  = $width /  $thumbnailWidth;
-        $heightRatio = $height / $thumbnailHeight;
+        $scalingRatio = min($originalWidth / $thumbnailWidth, $originalHeight / $thumbnailHeight);
+        $scaledWidth = (int) round($originalWidth / $scalingRatio);
+        $scaledHeight = (int) round($originalHeight / $scalingRatio);
 
-        $optimalRatio = min($heightRatio, $widthRatio);
+        $cropX = (int) (($scaledWidth - $thumbnailWidth) / 2);
+        $cropY = (int) (($scaledHeight - $thumbnailHeight) / 2);
 
-        $width  = round( $width  / $optimalRatio );
-        $height = round( $height / $optimalRatio );
+        imagecopyresampled(
+            $this->thumbnail,
+            $this->image,
+            0,
+            0,
+            $cropX,
+            $cropY,
+            $thumbnailWidth,
+            $thumbnailHeight,
+            $scaledWidth,
+            $scaledHeight
+        );
 
-        $cropStartX = ($width / 2) - ($thumbnailWidth / 2);
-        $cropStartY = ($height / 2) - ($thumbnailHeight / 2);
-
-        imagecopyresampled($this->thumbnail, $this->image, 0, 0, $cropStartX, $cropStartY, $thumbnailWidth, $thumbnailHeight, $width, $height);
-
-        match ($this->imageMime) {
-            'image/jpeg' => imagejpeg($this->thumbnail, $savePath . $this->fileName),
-            'image/gif'  => imagegif($this->thumbnail, $savePath . $this->fileName),
-            'image/png'  => imagepng($this->thumbnail, $savePath . $this->fileName)
-        };
-
-        chmod($savePath, 0755);
+        $this->saveThumbnail($savePath);
+        chmod($savePath, octdec($chmod));
     }
 
     /**
+     * Ensure the GD library is loaded.
+     *
      * @throws Exception
      */
-    protected function checkGD(): void
+    protected function ensureGdIsLoaded(): void
     {
         if (!extension_loaded('gd') || !function_exists('gd_info')) {
-            throw new Exception('GD module is not loaded, please contact to the server supervisor.');
+            throw new Exception('GD library is not available. Please enable it on the server.');
         }
     }
 
     /**
+     * Check if a file exists.
+     *
+     * @param string $filePath
      * @throws Exception
      */
-    protected function checkFileExistence($imageRealPath): void
+    protected function ensureFileExists(string $filePath): void
     {
-        if (!file_exists($imageRealPath)) {
-            throw new Exception('Image does not exist');
+        if (!file_exists($filePath)) {
+            throw new Exception("File not found at: $filePath");
         }
     }
 
     /**
+     * Ensure the file is a valid image.
+     *
+     * @param string $filePath
      * @throws Exception
      */
-    protected function checkIsImage($imageRealPath): void
+    protected function ensureFileIsImage(string $filePath): void
     {
+        $mimeType = mime_content_type($filePath);
+        $validMimeTypes = ['image/jpeg', 'image/gif', 'image/png', 'image/bmp'];
 
-        $file = $imageRealPath;
-
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $mimeType = finfo_file($finfo, $file);
-        finfo_close($finfo);
-
-        $is_image_file = match ($mimeType) {
-            'image/jpeg', 'image/gif', 'image/png', 'image/bmp' => true,
-            default                                             => false,
-        };
-
-        if (!$is_image_file) {
-            throw new Exception('file is not image.');
+        if (!in_array($mimeType, $validMimeTypes, true)) {
+            throw new Exception('The specified file is not a valid image.');
         }
+
+        $this->imageMime = $mimeType;
     }
 
     /**
-     * @param $realPath
-     * @return void
+     * Extract and sanitize the file name from the file path.
+     *
+     * @param string $filePath
      */
-    protected function readFile($realPath): void
+    protected function setFileNameFromPath(string $filePath): void
     {
-        $dimension = getimagesize($realPath);
-        $this->imageMime = $dimension['mime'];
+        $this->fileName = str_replace(['%', ' '], ['-', '-'], basename($filePath));
+    }
 
+    /**
+     * Load an image into a GD resource based on its mime type.
+     *
+     * @param string $filePath
+     * @throws Exception
+     */
+    protected function loadImage(string $filePath): void
+    {
         $this->image = match ($this->imageMime) {
-            'image/jpeg' => imagecreatefromjpeg($realPath),
-            'image/gif'  => imagecreatefromgif($realPath),
-            'image/png'  => imagecreatefrompng($realPath),
-            default      => null,
+            'image/jpeg' => imagecreatefromjpeg($filePath),
+            'image/gif'  => imagecreatefromgif($filePath),
+            'image/png'  => imagecreatefrompng($filePath),
+            default      => throw new Exception('Unsupported image type.')
         };
     }
 
     /**
-     * @param $path
-     * @return void
+     * Save the generated thumbnail to the specified path.
+     *
+     * @param string $savePath
+     * @throws Exception
      */
-    protected function setFileName($path): void
+    protected function saveThumbnail(string $savePath): void
     {
-        $image = explode('/', $path);
-        $name = end($image);
-        $name = str_replace('%', '-', $name);
-        $this->fileName = str_replace(' ', '-', $name);
-    }
+        $outputFunction = match ($this->imageMime) {
+            'image/jpeg' => 'imagejpeg',
+            'image/gif'  => 'imagegif',
+            'image/png'  => 'imagepng',
+            default      => null
+        };
 
+        if (!$outputFunction || !$outputFunction($this->thumbnail, $savePath . $this->fileName)) {
+            throw new Exception('Failed to save the thumbnail image.');
+        }
+    }
 }
